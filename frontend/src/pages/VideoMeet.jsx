@@ -93,7 +93,9 @@ export default function VideoMeetComponent() {
 
     for (let id in connections) {
       if (id === socketIdRef.current) continue;
-      connections[id].addStream(window.localStream);
+      window.localStream.getTracks().forEach((track) => {
+        connections[id].addTrack(track, window.localStream);
+      });
       connections[id].createOffer().then((description) => {
         connections[id]
           .setLocalDescription(description)
@@ -298,16 +300,19 @@ export default function VideoMeetComponent() {
               });
             }
           };
+          // Replace deprecated addStream with addTrack
           if (window.localStream !== undefined && window.localStream !== null) {
-            connections[socketListId].addStream(window.localStream);
+            window.localStream.getTracks().forEach((track) => {
+              connections[socketListId].addTrack(track, window.localStream);
+            });
           } else {
             //TODO BLACK SILENCE
-            // let blacksilence
-
             let blackSilence = (...args) =>
               new MediaStream([black(...args), silence()]);
             window.localStream = blackSilence();
-            connections[socketListId].addStream(window.localStream);
+            window.localStream.getTracks().forEach((track) => {
+              connections[socketListId].addTrack(track, window.localStream);
+            });
           }
         });
         if (id === socketIdRef.current) {
@@ -365,21 +370,22 @@ export default function VideoMeetComponent() {
       ) : (
         <>
           <video ref={localVideoRef} autoPlay muted></video>
-          {videos.map((video) => {
+          {videos.map((video) => (
             <div key={video.socketId}>
               <h2>{video.socketId}</h2>
-              <video>
-                data-socket = {video.socketId}
-                ref=
-                {(ref) => {
+              <video
+                data-socket={video.socketId}
+                ref={(ref) => {
                   if (ref && video.stream) {
                     ref.srcObject = video.stream;
                   }
                 }}
-                autoPlay;
-              </video>
-            </div>;
-          })}
+                autoPlay
+                playsInline
+                style={{ width: "300px", margin: "10px" }}
+              />
+            </div>
+          ))}
         </>
       )}
     </div>
