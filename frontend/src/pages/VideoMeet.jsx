@@ -5,6 +5,7 @@ import { io } from "socket.io-client";
 const server_url = "http://localhost:8000";
 
 var connections = {};
+var iceCandidateQueues = {};
 
 const peerConfigConnections = {
   iceServer: [{ url: "stun:stun.l.google.com:19302" }],
@@ -92,7 +93,7 @@ export default function VideoMeetComponent() {
 
     for (let id in connections) {
       if (id === socketIdRef.current) continue;
-      connections[id].addStream(window.localStram);
+      connections[id].addStream(window.localStream);
       connections[id].createOffer().then((description) => {
         connections[id]
           .setLocalDescription(description)
@@ -106,6 +107,63 @@ export default function VideoMeetComponent() {
           .catch((e) => console.log(e));
       });
     }
+    stream.getTracks().foreach(
+      (track) =>
+        (track.onended = () => {
+          setVideo(false);
+          setAudio(false);
+
+          try {
+            let tracks = localVideoRef.current.srcObject.getTracks();
+            tracks.forEach((track) => track.stop());
+          } catch (err) {
+            console.log(err);
+          }
+          // TODO BlackSilence
+          let blackSilence = (...args) =>
+            new MediaStream([black(...args), silence()]);
+          window.localStream = blackSilence();
+          localVideoRef.current.srcObject = window.localStream;
+
+          for (let id in connections) {
+            connections[id].addStream(window.localStream);
+            connections[id].createOffer().then((description) => {
+              connections[id]
+                .setLocalDescription(description)
+                .then(() => {
+                  socketRef.current.emit(
+                    "signal",
+                    id,
+                    JSON.stringify({
+                      sdp: connections[id].setLocalDescription(description),
+                    })
+                  );
+                })
+                .catch((e) => console.log(e));
+            });
+          }
+        })
+    );
+  };
+
+  let silence = () => {
+    let ctx = new AudioContext();
+    let oscilator = ctx.createOscillator();
+
+    let dst = oscilator.connect(ctx.createMediaStreamDestination());
+    oscilator.start();
+    ctx.resume();
+    return Object.assign(dst.stream.getAudioTracks()[0], { enabled: false });
+  };
+
+  let black = ({ width = 640, height = 480 } = {}) => {
+    let canvas = Object.assign(document.createElement("canvas"), {
+      width,
+      height,
+    });
+    canvas.getContext("2d").fillRect(0, 0, width, height);
+    let stream = canvas.captureStream();
+    return Object.assign(stream.getVideoTracks()[0], { enabled: false });
   };
 
   let getUserMedia = () => {
@@ -137,6 +195,15 @@ export default function VideoMeetComponent() {
         connections[fromId]
           .setRemoteDescription(new RTCSessionDescription(signal.sdp))
           .then(() => {
+            // Add any queued ICE candidates after setting remote description
+            if (iceCandidateQueues[fromId]) {
+              iceCandidateQueues[fromId].forEach((candidate) => {
+                connections[fromId]
+                  .addIceCandidate(candidate)
+                  .catch((e) => console.log(e));
+              });
+              iceCandidateQueues[fromId] = [];
+            }
             if (signal.sdp.type === "offer") {
               connections[fromId]
                 .createAnswer()
@@ -160,9 +227,19 @@ export default function VideoMeetComponent() {
       }
     }
     if (signal.ice) {
-      connections[fromId]
-        .addIceCandidate(new RTCIceCandidate(signal.ice))
-        .catch((e) => console.log(e));
+      if (
+        connections[fromId] &&
+        connections[fromId].remoteDescription &&
+        connections[fromId].remoteDescription.type
+      ) {
+        connections[fromId]
+          .addIceCandidate(new RTCIceCandidate(signal.ice))
+          .catch((e) => console.log(e));
+      } else {
+        // Queue ICE candidates until remote description is set
+        if (!iceCandidateQueues[fromId]) iceCandidateQueues[fromId] = [];
+        iceCandidateQueues[fromId].push(new RTCIceCandidate(signal.ice));
+      }
     }
   };
 
@@ -176,7 +253,7 @@ export default function VideoMeetComponent() {
       socketIdRef.current = socketRef.current.id; // Store socket id separately
       socketRef.current.on("chat-message", addMessage);
       socketRef.current.on("user-left", (id) => {
-        setVideo((videos) => videos.filter((video) => video.socketId !== id));
+        setVideos((videos) => videos.filter((video) => video.socketId !== id));
       });
       socketRef.current.on("user-joined", (id, clients) => {
         clients.forEach((socketListId) => {
@@ -197,7 +274,7 @@ export default function VideoMeetComponent() {
               (video) => video.socketId === socketListId
             );
             if (videoExists) {
-              setVideo((videos) => {
+              setVideos((videos) => {
                 const updatedVideos = videos.map((video) =>
                   video.socketId === socketListId
                     ? { ...video, stream: event.stream }
@@ -226,6 +303,11 @@ export default function VideoMeetComponent() {
           } else {
             //TODO BLACK SILENCE
             // let blacksilence
+
+            let blackSilence = (...args) =>
+              new MediaStream([black(...args), silence()]);
+            window.localStream = blackSilence();
+            connections[socketListId].addStream(window.localStream);
           }
         });
         if (id === socketIdRef.current) {
@@ -281,7 +363,24 @@ export default function VideoMeetComponent() {
           </div>
         </div>
       ) : (
-        <></>
+        <>
+          <video ref={localVideoRef} autoPlay muted></video>
+          {videos.map((video) => {
+            <div key={video.socketId}>
+              <h2>{video.socketId}</h2>
+              <video>
+                data-socket = {video.socketId}
+                ref=
+                {(ref) => {
+                  if (ref && video.stream) {
+                    ref.srcObject = video.stream;
+                  }
+                }}
+                autoPlay;
+              </video>
+            </div>;
+          })}
+        </>
       )}
     </div>
   );
