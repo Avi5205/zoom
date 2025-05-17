@@ -8,6 +8,7 @@ import { styled } from "@mui/material/styles";
 import AppTheme from "../shared-theme/AppTheme";
 import { AuthContext } from "../contexts/AuthContext";
 import { Snackbar } from "@mui/material";
+import { useNavigate } from "react-router-dom";
 import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
 
@@ -42,24 +43,46 @@ export default function Authentication(props) {
   const [formState, setFormState] = React.useState(0);
   const [open, setOpen] = React.useState(false);
   const [error, setError] = React.useState("");
-
   const { handleRegister, handleLogin } = React.useContext(AuthContext);
+  const navigate = useNavigate();
 
-  let handleAuth = async () => {
+  let handleAuth = async (event) => {
+    event.preventDefault(); // Prevent form reload
     try {
       if (formState === 0) {
+        let result = await handleLogin(username, password);
+        console.log(result);
+        navigate("/dashboard"); // Add navigation
       }
       if (formState === 1) {
         let result = await handleRegister(name, username, password);
-        console.log(result);
-        setMessages(result);
+        setFormState(0); // Switch to login after registration
+        setMessages("Registration successful! Please login");
         setOpen(true);
       }
     } catch (err) {
-      let message = err.response?.data?.message || err.message;
+      const message = err.response?.data?.message || err.message;
       setError(message);
     }
   };
+
+  // let handleAuth = async () => {
+  //   try {
+  //     if (formState === 0) {
+  //       let result = await handleLogin(username, password);
+  //       console.log(result);
+  //     }
+  //     if (formState === 1) {
+  //       let result = await handleRegister(name, username, password);
+  //       console.log(result);
+  //       setMessages(result);
+  //       setOpen(true);
+  //     }
+  //   } catch (err) {
+  //     let message = err.response?.data?.message || err.message;
+  //     setError(message);
+  //   }
+  // };
 
   const [emailError, setEmailError] = React.useState(false);
   const [passwordError, setPasswordError] = React.useState(false);
@@ -77,23 +100,24 @@ export default function Authentication(props) {
   };
 
   const validateInputs = () => {
-    const email = document.getElementById("email");
-    const password = document.getElementById("password");
-
     let isValid = true;
 
-    if (!email.value || !/\S+@\S+\.\S+/.test(email.value)) {
+    // Email validation
+    if (!username || !/\S+@\S+\.\S+/.test(username)) {
       setEmailError(true);
       isValid = false;
-    } else {
-      setEmailError(false);
-    }
+    } else setEmailError(false);
 
-    if (!password.value || password.value.length < 6) {
+    // Password validation
+    if (!password || password.length < 6) {
       setPasswordError(true);
       isValid = false;
-    } else {
-      setPasswordError(false);
+    } else setPasswordError(false);
+
+    // Additional name validation for registration
+    if (formState === 1 && (!name || name.length < 3)) {
+      setError("Name must be at least 3 characters");
+      isValid = false;
     }
 
     return isValid;
@@ -142,7 +166,7 @@ export default function Authentication(props) {
           </Stack>
           <Box
             component="form"
-            onSubmit={handleSubmit}
+            onSubmit={handleAuth}
             noValidate
             sx={{
               display: "flex",
